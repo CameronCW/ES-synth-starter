@@ -123,10 +123,18 @@ void loop() {
   std::bitset<32> inputs;
   // std::bitset<4> inputs = readCols();
 
-  for(int loopCount = 0; loopCount < 8; loopCount++){
+  for(int loopCount = 0; loopCount < 3; loopCount++){
     setRow(loopCount);
     delayMicroseconds(3); //needed due to parasitic cap
-    inputs.set((4*loopCount - 1) , readCols().to_ulong()); //Input Values stored as inputs
+    delayMicroseconds(3); //needed due to parasitic cap
+    std::bitset<4> inputShort = readCols();
+  // u8g2.setCursor(3,30);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
+  // u8g2.print(inputShort.to_ulong(),HEX);
+
+    // for (int i = 0; i < 4; ++i) {
+    //     inputs[(4*loopCount) + i] = inputShort[i];
+    // }
+    inputs.set((4*(loopCount+1)-1) , inputShort.to_ulong()); //Input Values stored as inputs
   }
 
   
