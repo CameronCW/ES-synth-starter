@@ -82,42 +82,27 @@ void setup() {
 
 
 std::bitset<4> readCols(){
-  digitalWrite(RA0_PIN, LOW);
-  digitalWrite(RA1_PIN, LOW);
-  digitalWrite(RA2_PIN, LOW);
     //Allows for row 0 to be read, C C# D D#
-  digitalWrite(REN_PIN,HIGH);
+    //C is LSB, D# MSB
   std::bitset<4> result;
 
-  // for (byte i = 0; i<8; i++){ 
-  //   //Write RA0 to RA2
-  //   //test C0 to C3, decode for R0 to R7
-  //     digitalWrite(RA0_PIN, (0x01&i));
-  //     digitalWrite(RA1_PIN, (0x02&i));
-  //     digitalWrite(RA2_PIN, (0x04&i));
-      
-  //     result[0] = digitalRead(C0_PIN);
-  //     result[1] = digitalRead(C1_PIN);
-  //     result[2] = digitalRead(C2_PIN);
-  //     result[3] = digitalRead(C3_PIN);
-  // //test each bit
-  //     delayMicroseconds(3);
-  // }
-
-
-    //Can bitwise operations on bitsets
-
-  //result[0] = ;
   result[0] = digitalRead(C0_PIN);
   result[1] = digitalRead(C1_PIN);
   result[2] = digitalRead(C2_PIN);
   result[3] = digitalRead(C3_PIN);
-  digitalWrite(REN_PIN,LOW);
 
   return result;
 }
 
-
+void setRow(uint8_t rowIdx){
+  digitalWrite(REN_PIN,LOW);
+  // for (byte i = 0; i<8; i++){ 
+  //   
+  digitalWrite(RA0_PIN, (0x01&rowIdx));
+  digitalWrite(RA1_PIN, (0x02&rowIdx));
+  digitalWrite(RA2_PIN, (0x04&rowIdx));
+  digitalWrite(REN_PIN,HIGH);
+}
 
 void loop() {
   // put your main code here, to run repeatedly:
@@ -135,7 +120,16 @@ void loop() {
   u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory, cursor starts at 2,10
   // u8g2.print(count++);      //Iteration count
   
-  std::bitset<4> inputs = readCols(); //Input Values stored as inputs
+  std::bitset<32> inputs;
+  // std::bitset<4> inputs = readCols();
+
+  for(int loopCount = 0; loopCount < 8; loopCount++){
+    setRow(loopCount);
+    delayMicroseconds(3); //needed due to parasitic cap
+    inputs.set((4*loopCount - 1) , readCols().to_ulong()); //Input Values stored as inputs
+  }
+
+  
   u8g2.setCursor(2,20);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
   u8g2.print(inputs.to_ulong(),HEX);  //Print the output data in HEX encoding from the position the cursor is set to
 
