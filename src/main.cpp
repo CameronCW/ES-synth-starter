@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <bitset>
+#include <math.h>
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -32,6 +33,31 @@
   const int DRST_BIT = 4;
   const int HKOW_BIT = 5;
   const int HKOE_BIT = 6;
+
+  //create frequency arrays
+    // Middle C 261.63 Hz 
+    //each step n_i = n_(i-1) = 2^(1/12)
+  int noteA = 440;  //Base frequency
+  int fSamp = 22000;
+  float freq = 261.63;
+  float step = (pow(2,32) * freq) / fSamp;
+  float eqTemperament = pow(2,1/12);
+
+  const uint32_t stepSizes [] = { 
+    pow(2,32) * (noteA / ( pow(  eqTemperament , 2  ) ) ) / (fSamp),  //C
+    pow(2,32) * (noteA / ( pow(  eqTemperament , 7  ) ) ) / (fSamp),  //C#
+    pow(2,32) * (noteA / ( pow(  eqTemperament , 6  ) ) ) / (fSamp),  //D
+    pow(2,32) * (noteA / ( pow(  eqTemperament , 5  ) ) ) / (fSamp),  //D#
+    pow(2,32) * (noteA / ( pow(  eqTemperament , 4  ) ) ) / (fSamp),  //E
+    pow(2,32) * (noteA / ( pow(  eqTemperament , 3  ) ) ) / (fSamp),  //F#
+    pow(2,32) * (noteA / ( pow(  eqTemperament , 2  ) ) ) / (fSamp),  //G
+    pow(2,32) * (noteA / ( pow(  eqTemperament , 1  ) ) ) / (fSamp),  //G#
+    pow(2,32) * (noteA * ( pow(  eqTemperament , 0  ) ) ) / (fSamp),  //A
+    pow(2,32) * (noteA * ( pow(  eqTemperament , 1  ) ) )/ (fSamp),   //A#
+    pow(2,32) * (noteA * ( pow(  eqTemperament , 2  ) ) )/ (fSamp),   //B
+  };    
+
+  volatile uint32_t currentStepSize;
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -95,6 +121,7 @@ std::bitset<4> readCols(){
 }
 
 void setRow(uint8_t rowIdx){
+  
   digitalWrite(REN_PIN,LOW);
   // for (byte i = 0; i<8; i++){ 
   //   
@@ -102,6 +129,38 @@ void setRow(uint8_t rowIdx){
   digitalWrite(RA1_PIN, (0x02&rowIdx));
   digitalWrite(RA2_PIN, (0x04&rowIdx));
   digitalWrite(REN_PIN,HIGH);
+}
+
+
+std::string keyPressed(std::bitset<32> inputs) {
+  for (int loopCount = 0; loopCount < 12; loopCount++) {
+    if ((inputs & 0x000000000001) == 0) {
+      return "C";
+    } else if ((inputs & 0x000000000010) == 0) {
+      return "C#";
+    } else if ((inputs & 0x000000000100) == 0) {
+      return "D";
+    } else if ((inputs & 0x000000001000) == 0) {
+      return "D#";
+    } else if ((inputs & 0x000000010000) == 0) {
+      return "E";
+    } else if ((inputs & 0x000000100000) == 0) {
+      return "F";
+    } else if ((inputs & 0x000001000000) == 0) {
+      return "F#";
+    } else if ((inputs & 0x000010000000) == 0) {
+      return "G";
+    }else if ((inputs & 0x000100000000) == 0) {
+      return "G#";
+    }else if ((inputs & 0x001000000000) == 0) {
+      return "A";
+    }else if ((inputs & 0x01000000000) == 0) {
+      return "A#";
+    }else if ((inputs & 0x10000000000) == 0) {
+      return "B";
+    }
+  }
+  return "XXXX";  // Default no key is pressed
 }
 
 void loop() {
@@ -126,16 +185,17 @@ void loop() {
   for(int loopCount = 0; loopCount < 3; loopCount++){
     setRow(loopCount);
     delayMicroseconds(3); //needed due to parasitic cap
-    delayMicroseconds(3); //needed due to parasitic cap
     std::bitset<4> inputShort = readCols();
-  // u8g2.setCursor(3,30);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
-  // u8g2.print(inputShort.to_ulong(),HEX);
+    // u8g2.setCursor(3,0);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
+    // u8g2.print(inputShort.to_ulong(),HEX);
 
-    // for (int i = 0; i < 4; ++i) {
-    //     inputs[(4*loopCount) + i] = inputShort[i];
-    // }
-    inputs.set((4*(loopCount+1)-1) , inputShort.to_ulong()); //Input Values stored as inputs
+    for (int i = 0; i < 4; ++i) {
+        inputs[( (4*loopCount+1)-1 ) + i] = inputShort[i];
+    }
+    // currentStepSize = 
   }
+
+
 
   
   u8g2.setCursor(2,20);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
