@@ -37,25 +37,27 @@
   //create frequency arrays
     // Middle C 261.63 Hz 
     //each step n_i = n_(i-1) = 2^(1/12)
-  int noteA = 440;  //Base frequency
-  int fSamp = 22000;
+  float fnoteA = 440;  //Base frequency
+  float fSamp = 22000;
   float freq = 261.63;
   float step = (pow(2,32) * freq) / fSamp;
-  float eqTemperament = pow(2,1/12);
+  float eqTemperament = pow(2.0,1.0/12.0);
 
   const uint32_t stepSizes [] = { 
-    pow(2,32) * (noteA / ( pow(  eqTemperament , 2  ) ) ) / (fSamp),  //C
-    pow(2,32) * (noteA / ( pow(  eqTemperament , 7  ) ) ) / (fSamp),  //C#
-    pow(2,32) * (noteA / ( pow(  eqTemperament , 6  ) ) ) / (fSamp),  //D
-    pow(2,32) * (noteA / ( pow(  eqTemperament , 5  ) ) ) / (fSamp),  //D#
-    pow(2,32) * (noteA / ( pow(  eqTemperament , 4  ) ) ) / (fSamp),  //E
-    pow(2,32) * (noteA / ( pow(  eqTemperament , 3  ) ) ) / (fSamp),  //F#
-    pow(2,32) * (noteA / ( pow(  eqTemperament , 2  ) ) ) / (fSamp),  //G
-    pow(2,32) * (noteA / ( pow(  eqTemperament , 1  ) ) ) / (fSamp),  //G#
-    pow(2,32) * (noteA * ( pow(  eqTemperament , 0  ) ) ) / (fSamp),  //A
-    pow(2,32) * (noteA * ( pow(  eqTemperament , 1  ) ) ) / (fSamp),   //A#
-    pow(2,32) * (noteA * ( pow(  eqTemperament , 2  ) ) ) / (fSamp),   //B
-  };    
+    pow(2,32) * (fnoteA / ( pow(  eqTemperament , 9.0  ) ) ) / (fSamp),  //C
+    pow(2,32) * (fnoteA / ( pow(  eqTemperament , 8.0  ) ) ) / (fSamp),  //C#
+    pow(2,32) * (fnoteA / ( pow(  eqTemperament , 7.0  ) ) ) / (fSamp),  //D
+    pow(2,32) * (fnoteA / ( pow(  eqTemperament , 6.0  ) ) ) / (fSamp),  //D#
+    pow(2,32) * (fnoteA / ( pow(  eqTemperament , 5.0  ) ) ) / (fSamp),  //E
+    pow(2,32) * (fnoteA / ( pow(  eqTemperament , 4.0  ) ) ) / (fSamp),  //F
+    pow(2,32) * (fnoteA / ( pow(  eqTemperament , 3.0  ) ) ) / (fSamp),  //F#
+    pow(2,32) * (fnoteA / ( pow(  eqTemperament , 2.0  ) ) ) / (fSamp),  //G
+    pow(2,32) * (fnoteA / ( pow(  eqTemperament , 1.0  ) ) ) / (fSamp),  //G#
+    pow(2,32) * (fnoteA * ( pow(  eqTemperament , 0.0  ) ) ) / (fSamp),   //A
+    pow(2,32) * (fnoteA * ( pow(  eqTemperament , 1.0  ) ) ) / (fSamp),   //A#
+    pow(2,32) * (fnoteA * ( pow(  eqTemperament , 2.0  ) ) ) / (fSamp)   //B
+  };   
+      //must be .0 to prevent integer division?
 
   volatile uint32_t currentStepSize;
 
@@ -72,6 +74,95 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,HIGH);
       delayMicroseconds(2);
       digitalWrite(REN_PIN,LOW);
+}
+
+void sampleISR() {
+  static uint32_t phaseAcc = 0; //Static variable, local scope (static means it is stored between successive fn, stored for program lifetime)
+                //But is shared between every instance (so if class, all instances share it)+
+  uint32_t localCurrentStepSize;
+  //__atomic_load_n(&currentStepSize, &localCurrentStepSize, __ATOMIC_RELAXED);                
+  //phaseAcc += localCurrentStepSize;
+  phaseAcc += currentStepSize;
+  int32_t Vout = (phaseAcc >> 24) - 128;
+      //Right-shift (divide by ) the phase accumlator and subtract , to scale the range to -2^7 <= Vout <= 2^7 -1:
+  analogWrite(OUTR_PIN, Vout + 128);
+  // In future, you will need to multiply and add signals, for example to implement a volume control or polyphony. That will be easier when samples have an offset of zero because the 
+  //offset will be unaffected by mathematical operations. 
+  //Meanwhile, the phase accumulator itself cannot have a zero offset because that would require a signed integer and the overflow of signed integers results in undefined behaviour in C and C++.
+}
+
+std::bitset<4> readCols(){
+    //Allows for row 0 to be read, C C# D D#
+    //C is LSB, D# MSB
+  std::bitset<4> result;
+
+  result[0] = digitalRead(C0_PIN);
+  result[1] = digitalRead(C1_PIN);
+  result[2] = digitalRead(C2_PIN);
+  result[3] = digitalRead(C3_PIN);
+
+  return result;
+}
+
+void setRow(uint8_t rowIdx){
+  
+  digitalWrite(REN_PIN,LOW);
+  // for (byte i = 0; i<8; i++){ 
+  //   
+  digitalWrite(RA0_PIN, (0x01&rowIdx));
+  digitalWrite(RA1_PIN, (0x02&rowIdx));
+  digitalWrite(RA2_PIN, (0x04&rowIdx));
+  digitalWrite(REN_PIN,HIGH);
+}
+
+std::string keyPressed(std::bitset<32> inputs) {
+  uint32_t localCurrentStepSize;
+  std::string note = "x";
+  for (int loopCount = 0; loopCount < 12; loopCount++) {
+    if (inputs.test(0) ) {
+      localCurrentStepSize = stepSizes[0];
+      note = "C";
+    } else if (inputs.test(1) ) {
+      localCurrentStepSize = stepSizes[1];
+      note = "C#";
+    } else if (inputs.test(2) ) {
+      localCurrentStepSize = stepSizes[2];
+      note = "D";
+    } else if (inputs.test(3) ) {
+      localCurrentStepSize = stepSizes[3];
+      note = "D#";
+    } else if (inputs.test(4) ) {
+      localCurrentStepSize = stepSizes[4];
+      note = "E";
+    } else if (inputs.test(5) ) {
+      localCurrentStepSize = stepSizes[5];
+      note = "F";
+    } else if (inputs.test(6) ) {
+      localCurrentStepSize = stepSizes[6];
+      note = "F#";
+    } else if (inputs.test(7) ) {
+      localCurrentStepSize = stepSizes[7];
+      note = "G";
+    }else if (inputs.test(8) ) {
+      localCurrentStepSize = stepSizes[8];
+      note = "G#";
+    }else if (inputs.test(9) ) {
+      localCurrentStepSize = stepSizes[9];
+      note = "A";
+    }else if (inputs.test(10) ) {
+      localCurrentStepSize = stepSizes[10];
+      note = "A#";
+    }else if (inputs.test(11) ) {
+      localCurrentStepSize = stepSizes[11];
+      note = "B";
+    }else{
+      //Default
+      localCurrentStepSize = 0;    //No noise to play when not pressed
+      note = "X";    // Default no key is pressed
+    }
+  }
+  __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
+  return note;  
 }
 
 void setup() {
@@ -104,63 +195,13 @@ void setup() {
   //Initialise UART
   Serial.begin(9600);
   Serial.println("Hello World");
-}
 
-
-std::bitset<4> readCols(){
-    //Allows for row 0 to be read, C C# D D#
-    //C is LSB, D# MSB
-  std::bitset<4> result;
-
-  result[0] = digitalRead(C0_PIN);
-  result[1] = digitalRead(C1_PIN);
-  result[2] = digitalRead(C2_PIN);
-  result[3] = digitalRead(C3_PIN);
-
-  return result;
-}
-
-void setRow(uint8_t rowIdx){
-  
-  digitalWrite(REN_PIN,LOW);
-  // for (byte i = 0; i<8; i++){ 
-  //   
-  digitalWrite(RA0_PIN, (0x01&rowIdx));
-  digitalWrite(RA1_PIN, (0x02&rowIdx));
-  digitalWrite(RA2_PIN, (0x04&rowIdx));
-  digitalWrite(REN_PIN,HIGH);
-}
-
-
-std::string keyPressed(std::bitset<32> inputs) {
-  for (int loopCount = 0; loopCount < 12; loopCount++) {
-    if (inputs.test(0) ) {
-      return "C";
-    } else if (inputs.test(1) ) {
-      return "C#";
-    } else if (inputs.test(2) ) {
-      return "D";
-    } else if (inputs.test(3) ) {
-      return "D#";
-    } else if (inputs.test(4) ) {
-      return "E";
-    } else if (inputs.test(5) ) {
-      return "F";
-    } else if (inputs.test(6) ) {
-      return "F#";
-    } else if (inputs.test(7) ) {
-      return "G";
-    }else if (inputs.test(8) ) {
-      return "G#";
-    }else if (inputs.test(9) ) {
-      return "A";
-    }else if (inputs.test(10) ) {
-      return "A#";
-    }else if (inputs.test(11) ) {
-      return "B";
-    }
-  }
-  return "XXXX";  // Default no key is pressed
+  //Setup hardware timer of 22KHZ to periodically call the ISR
+  TIM_TypeDef *Instance = TIM1;
+  HardwareTimer *sampleTimer = new HardwareTimer(Instance);
+  sampleTimer->setOverflow(22000, HERTZ_FORMAT);
+  sampleTimer->attachInterrupt(sampleISR);
+  sampleTimer->resume();
 }
 
 void loop() {
@@ -192,21 +233,62 @@ void loop() {
     for (int i = 0; i < 4; ++i) {
         inputs[( (4*loopCount+1)-1 ) + i] = ~ inputShort[i];  //bit inversion
     }
-    // currentStepSize = 
   }
 
+  // Add code to your main loop that will check the state of each key in inputs and look up the 
+  // corresponding step size in the stepSizes array if the key is pressed. Store the result in a global variable: currentStepSize
+  // currentStepSize handled in the keyPressed section
+  std::string note = keyPressed(inputs);
 
-
+  // switch (note){
+  //   case "C":
+  //     currentStepSize = stepSizes[0];
+  //     break;
+  //   case "C#":
+  //     currentStepSize = stepSizes[1];
+  //     break;
+  //   case "D":
+  //     currentStepSize = stepSizes[2];
+  //     break;
+  //   case "D#":
+  //     currentStepSize = stepSizes[3];
+  //     break;
+  //   case "E":
+  //     currentStepSize = stepSizes[4];
+  //     break;
+  //   case "F":
+  //     currentStepSize = stepSizes[5];
+  //     break;  
+  //   case "F#":
+  //     currentStepSize = stepSizes[6];
+  //     break;                      
+  //   case "G":
+  //     currentStepSize = stepSizes[7];
+  //     break;
+  //   case "G#":
+  //     currentStepSize = stepSizes[8];
+  //     break;
+  //   case "A":
+  //     currentStepSize = stepSizes[9];
+  //     break;
+  //   case "A#":
+  //     currentStepSize = stepSizes[10];
+  //     break;
+  //   case "B":
+  //     currentStepSize = stepSizes[11];
+  //     break;                              
+  //   default:
+  //     currentStepSize = stepSizes[9];
+  // }
   
   u8g2.setCursor(2,20);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
   //u8g2.print(inputs.to_ulong(),HEX);  //Print the output data in HEX encoding from the position the cursor is set to
   //u8g2.print(keyPressed(inputs).to_ulong(), HEX);  //Print the output data in HEX encoding from the position the cursor is set to
-  u8g2.print(keyPressed(inputs).c_str());  //Print the output data in HEX encoding from the position the cursor is set to
-
+  u8g2.print(note.c_str());  //Print the output data in HEX encoding from the position the cursor is set to
+  // u8g2.setCursor(2, 20);
+  // u8g2.print("Step Sizes: ");
+  // u8g2.print(currentStepSize); 
   u8g2.sendBuffer();          // transfer internal memory to the display
-
-
-
 
   //Toggle LED
   digitalToggle(LED_BUILTIN);
