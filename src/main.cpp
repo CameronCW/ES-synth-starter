@@ -53,8 +53,8 @@
     pow(2,32) * (noteA / ( pow(  eqTemperament , 2  ) ) ) / (fSamp),  //G
     pow(2,32) * (noteA / ( pow(  eqTemperament , 1  ) ) ) / (fSamp),  //G#
     pow(2,32) * (noteA * ( pow(  eqTemperament , 0  ) ) ) / (fSamp),  //A
-    pow(2,32) * (noteA * ( pow(  eqTemperament , 1  ) ) )/ (fSamp),   //A#
-    pow(2,32) * (noteA * ( pow(  eqTemperament , 2  ) ) )/ (fSamp),   //B
+    pow(2,32) * (noteA * ( pow(  eqTemperament , 1  ) ) ) / (fSamp),   //A#
+    pow(2,32) * (noteA * ( pow(  eqTemperament , 2  ) ) ) / (fSamp),   //B
   };    
 
   volatile uint32_t currentStepSize;
@@ -134,29 +134,29 @@ void setRow(uint8_t rowIdx){
 
 std::string keyPressed(std::bitset<32> inputs) {
   for (int loopCount = 0; loopCount < 12; loopCount++) {
-    if ((inputs & 0x000000000001) == 0) {
+    if (inputs.test(0) ) {
       return "C";
-    } else if ((inputs & 0x000000000010) == 0) {
+    } else if (inputs.test(1) ) {
       return "C#";
-    } else if ((inputs & 0x000000000100) == 0) {
+    } else if (inputs.test(2) ) {
       return "D";
-    } else if ((inputs & 0x000000001000) == 0) {
+    } else if (inputs.test(3) ) {
       return "D#";
-    } else if ((inputs & 0x000000010000) == 0) {
+    } else if (inputs.test(4) ) {
       return "E";
-    } else if ((inputs & 0x000000100000) == 0) {
+    } else if (inputs.test(5) ) {
       return "F";
-    } else if ((inputs & 0x000001000000) == 0) {
+    } else if (inputs.test(6) ) {
       return "F#";
-    } else if ((inputs & 0x000010000000) == 0) {
+    } else if (inputs.test(7) ) {
       return "G";
-    }else if ((inputs & 0x000100000000) == 0) {
+    }else if (inputs.test(8) ) {
       return "G#";
-    }else if ((inputs & 0x001000000000) == 0) {
+    }else if (inputs.test(9) ) {
       return "A";
-    }else if ((inputs & 0x01000000000) == 0) {
+    }else if (inputs.test(10) ) {
       return "A#";
-    }else if ((inputs & 0x10000000000) == 0) {
+    }else if (inputs.test(11) ) {
       return "B";
     }
   }
@@ -190,7 +190,7 @@ void loop() {
     // u8g2.print(inputShort.to_ulong(),HEX);
 
     for (int i = 0; i < 4; ++i) {
-        inputs[( (4*loopCount+1)-1 ) + i] = inputShort[i];
+        inputs[( (4*loopCount+1)-1 ) + i] = ~ inputShort[i];  //bit inversion
     }
     // currentStepSize = 
   }
@@ -199,7 +199,9 @@ void loop() {
 
   
   u8g2.setCursor(2,20);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
-  u8g2.print(inputs.to_ulong(),HEX);  //Print the output data in HEX encoding from the position the cursor is set to
+  //u8g2.print(inputs.to_ulong(),HEX);  //Print the output data in HEX encoding from the position the cursor is set to
+  //u8g2.print(keyPressed(inputs).to_ulong(), HEX);  //Print the output data in HEX encoding from the position the cursor is set to
+  u8g2.print(keyPressed(inputs).c_str());  //Print the output data in HEX encoding from the position the cursor is set to
 
   u8g2.sendBuffer();          // transfer internal memory to the display
 
