@@ -96,6 +96,7 @@ void sampleISR() {
 struct {    //store system state that is used in more than one thread
   std::bitset<32> inputs;  // only contains the input bitset. The only other global variable is currentStepSize, 
           //but keep that apart from sysState because it is accessed by an ISR and the synchronisation method will be different
+  SemaphoreHandle_t mutex;  //access to inputs is multiple cycles, therefore a mutex protects it from the multicycle threads accesses  
 } sysState;
 
 std::bitset<4> readCols(){
@@ -122,45 +123,47 @@ void setRow(uint8_t rowIdx){
   digitalWrite(REN_PIN,HIGH);
 }
 
-std::string keyPressed(std::bitset<32> inputs) {
+std::string keyPressed() {
       //Currently only registers a single key pressed
+      //Alternatively can pass no inputs and use sysState.inputs
   uint32_t localCurrentStepSize;
   std::string note = "x";
+  xSemaphoreTake(sysState.mutex, portMAX_DELAY);  //Begin mutex lock
   for (int loopCount = 0; loopCount < 12; loopCount++) {
-    if (inputs.test(0) ) {
+    if (sysState.inputs.test(0) ) {
       localCurrentStepSize = stepSizes[0];
       note = "C";
-    } else if (inputs.test(1) ) {
+    } else if (sysState.inputs.test(1) ) {
       localCurrentStepSize = stepSizes[1];
       note = "C#";
-    } else if (inputs.test(2) ) {
+    } else if (sysState.inputs.test(2) ) {
       localCurrentStepSize = stepSizes[2];
       note = "D";
-    } else if (inputs.test(3) ) {
+    } else if (sysState.inputs.test(3) ) {
       localCurrentStepSize = stepSizes[3];
       note = "D#";
-    } else if (inputs.test(4) ) {
+    } else if (sysState.inputs.test(4) ) {
       localCurrentStepSize = stepSizes[4];
       note = "E";
-    } else if (inputs.test(5) ) {
+    } else if (sysState.inputs.test(5) ) {
       localCurrentStepSize = stepSizes[5];
       note = "F";
-    } else if (inputs.test(6) ) {
+    } else if (sysState.inputs.test(6) ) {
       localCurrentStepSize = stepSizes[6];
       note = "F#";
-    } else if (inputs.test(7) ) {
+    } else if (sysState.inputs.test(7) ) {
       localCurrentStepSize = stepSizes[7];
       note = "G";
-    }else if (inputs.test(8) ) {
+    }else if (sysState.inputs.test(8) ) {
       localCurrentStepSize = stepSizes[8];
       note = "G#";
-    }else if (inputs.test(9) ) {
+    }else if (sysState.inputs.test(9) ) {
       localCurrentStepSize = stepSizes[9];
       note = "A";
-    }else if (inputs.test(10) ) {
+    }else if (sysState.inputs.test(10) ) {
       localCurrentStepSize = stepSizes[10];
       note = "A#";
-    }else if (inputs.test(11) ) {
+    }else if (sysState.inputs.test(11) ) {
       localCurrentStepSize = stepSizes[11];
       note = "B";
     }else{
@@ -168,6 +171,7 @@ std::string keyPressed(std::bitset<32> inputs) {
       localCurrentStepSize = 0;    //No noise to play when not pressed
       note = "X";    // Default no key is pressed
     }
+    xSemaphoreGive(sysState.mutex); //End Mutex lock
   }
   __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
   return note;  
@@ -188,12 +192,13 @@ void scanKeysTask(void * pvParameters) {        //code for scanning the keyboard
       for(int loopCount = 0; loopCount < 3; loopCount++){
         setRow(loopCount);
         delayMicroseconds(3); //needed due to parasitic cap
+
         std::bitset<4> inputShort = readCols();
-        // u8g2.setCursor(3,0);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
-        // u8g2.print(inputShort.to_ulong(),HEX);
 
         for (int i = 0; i < 4; ++i) {
+            xSemaphoreTake(sysState.mutex, portMAX_DELAY);
             sysState.inputs[( (4*loopCount+1)-1 ) + i] = ~ inputShort[i];  //bit inversion
+            xSemaphoreGive(sysState.mutex);
         }
       } 
   }
@@ -221,7 +226,7 @@ void displayUpdateTask(void * pvParameters){
     // u8g2.print(count++);      //Iteration count
     
     // currentStepSize handled in the keyPressed section
-    std::string note = keyPressed(sysState.inputs);
+    std::string note = keyPressed();
 
     u8g2.setCursor(2,20);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
     //u8g2.print(inputs.to_ulong(),HEX);  //Print the output data in HEX encoding from the position the cursor is set to
@@ -297,6 +302,7 @@ void setup() {
   &displayUpdateTaskHandle );	/* Pointer to store the task handle */
 
   
+  sysState.mutex = xSemaphoreCreateMutex();   //creates mutex and assigns handle
 
   vTaskStartScheduler();  //has to go at the end
 
