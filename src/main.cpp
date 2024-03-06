@@ -177,10 +177,13 @@ void scanKeysTask(void * pvParameters) {        //code for scanning the keyboard
     // Loop through the rows of the key matrix
     // Read the columns of the matrix and store the result in sysState.inputs
     // Look up the phase step size for the key that is pressed and update currentStepSize
+  const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
 
   while (1) {   //Infinite loop - i.e independent thread
       //std::bitset<32> inputs; //superseded by sysState.inputs
       // std::bitset<4> inputs = readCols();
+      vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
       for(int loopCount = 0; loopCount < 3; loopCount++){
         setRow(loopCount);
@@ -193,6 +196,44 @@ void scanKeysTask(void * pvParameters) {        //code for scanning the keyboard
             sysState.inputs[( (4*loopCount+1)-1 ) + i] = ~ inputShort[i];  //bit inversion
         }
       } 
+  }
+}
+
+
+void displayUpdateTask(void * pvParameters){
+  const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  while(1){
+      // put your main code here, to run repeatedly:
+    // static uint32_t next = millis();
+    static uint32_t count = 0;
+
+    // while (millis() < next);  //Wait for next interval
+
+    // next += interval;
+
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );   //New delay to supersede the millis()<next
+
+    //Update display
+    u8g2.clearBuffer();         // clear the internal memory
+    u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
+    u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory, cursor starts at 2,10
+    // u8g2.print(count++);      //Iteration count
+    
+    // currentStepSize handled in the keyPressed section
+    std::string note = keyPressed(sysState.inputs);
+
+    u8g2.setCursor(2,20);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
+    //u8g2.print(inputs.to_ulong(),HEX);  //Print the output data in HEX encoding from the position the cursor is set to
+    //u8g2.print(keyPressed(inputs).to_ulong(), HEX);  //Print the output data in HEX encoding from the position the cursor is set to
+    u8g2.print(note.c_str());  //Print the output data in HEX encoding from the position the cursor is set to
+    // u8g2.setCursor(2, 20);
+    // u8g2.print("Step Sizes: ");
+    // u8g2.print(currentStepSize); 
+    u8g2.sendBuffer();          // transfer internal memory to the display
+
+    //Toggle LED
+    digitalToggle(LED_BUILTIN);
   }
 }
 
@@ -242,43 +283,27 @@ void setup() {
   "scanKeys",		/* Text name for the task */
   64,      		/* Stack size in words, not bytes */
   NULL,			/* Parameter passed into the task */  //pvParameters input NULL for now
-  1,			/* Task priority */
+  2,			/* Task priority */
   &scanKeysHandle );	/* Pointer to store the task handle */
+
+    // initialise and run the independent thread
+  TaskHandle_t displayUpdateTaskHandle = NULL;
+  xTaskCreate(
+  displayUpdateTask,		/* Function that implements the task */
+  "displayUpdate",		/* Text name for the task */
+  256,      		/* Stack size in words, not bytes */
+  NULL,			/* Parameter passed into the task */  //pvParameters input NULL for now
+  1,			/* Task priority */
+  &displayUpdateTaskHandle );	/* Pointer to store the task handle */
+
+  
 
   vTaskStartScheduler();  //has to go at the end
 
 }
 
 
-void loop() {
-  // put your main code here, to run repeatedly:
-  static uint32_t next = millis();
-  static uint32_t count = 0;
-
-  while (millis() < next);  //Wait for next interval
-
-  next += interval;
-
-  //Update display
-  u8g2.clearBuffer();         // clear the internal memory
-  u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-  u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory, cursor starts at 2,10
-  // u8g2.print(count++);      //Iteration count
-  
-  // currentStepSize handled in the keyPressed section
-  std::string note = keyPressed(sysState.inputs);
-
-  u8g2.setCursor(2,20);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
-  //u8g2.print(inputs.to_ulong(),HEX);  //Print the output data in HEX encoding from the position the cursor is set to
-  //u8g2.print(keyPressed(inputs).to_ulong(), HEX);  //Print the output data in HEX encoding from the position the cursor is set to
-  u8g2.print(note.c_str());  //Print the output data in HEX encoding from the position the cursor is set to
-  // u8g2.setCursor(2, 20);
-  // u8g2.print("Step Sizes: ");
-  // u8g2.print(currentStepSize); 
-  u8g2.sendBuffer();          // transfer internal memory to the display
-
-  //Toggle LED
-  digitalToggle(LED_BUILTIN);
+void loop() { //Typically left empty
   
 }
 
