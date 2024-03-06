@@ -2,6 +2,8 @@
 #include <U8g2lib.h>
 #include <bitset>
 #include <math.h>
+#include <STM32FreeRTOS.h>    //Install the 'STM32duino FreeRTOS' library with the Platformio library manager. Include its header file at the start of your source file:
+
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -91,6 +93,11 @@ void sampleISR() {
   //Meanwhile, the phase accumulator itself cannot have a zero offset because that would require a signed integer and the overflow of signed integers results in undefined behaviour in C and C++.
 }
 
+struct {    //store system state that is used in more than one thread
+  std::bitset<32> inputs;  // only contains the input bitset. The only other global variable is currentStepSize, 
+          //but keep that apart from sysState because it is accessed by an ISR and the synchronisation method will be different
+} sysState;
+
 std::bitset<4> readCols(){
     //Allows for row 0 to be read, C C# D D#
     //C is LSB, D# MSB
@@ -116,6 +123,7 @@ void setRow(uint8_t rowIdx){
 }
 
 std::string keyPressed(std::bitset<32> inputs) {
+      //Currently only registers a single key pressed
   uint32_t localCurrentStepSize;
   std::string note = "x";
   for (int loopCount = 0; loopCount < 12; loopCount++) {
@@ -165,6 +173,30 @@ std::string keyPressed(std::bitset<32> inputs) {
   return note;  
 }
 
+void scanKeysTask(void * pvParameters) {        //code for scanning the keyboard
+    // Loop through the rows of the key matrix
+    // Read the columns of the matrix and store the result in sysState.inputs
+    // Look up the phase step size for the key that is pressed and update currentStepSize
+
+  while (1) {   //Infinite loop - i.e independent thread
+      //std::bitset<32> inputs; //superseded by sysState.inputs
+      // std::bitset<4> inputs = readCols();
+
+      for(int loopCount = 0; loopCount < 3; loopCount++){
+        setRow(loopCount);
+        delayMicroseconds(3); //needed due to parasitic cap
+        std::bitset<4> inputShort = readCols();
+        // u8g2.setCursor(3,0);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
+        // u8g2.print(inputShort.to_ulong(),HEX);
+
+        for (int i = 0; i < 4; ++i) {
+            sysState.inputs[( (4*loopCount+1)-1 ) + i] = ~ inputShort[i];  //bit inversion
+        }
+      } 
+  }
+}
+
+
 void setup() {
   // put your setup code here, to run once:
 
@@ -202,7 +234,21 @@ void setup() {
   sampleTimer->setOverflow(22000, HERTZ_FORMAT);
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
+
+  // initialise and run the independent thread
+  TaskHandle_t scanKeysHandle = NULL;
+  xTaskCreate(
+  scanKeysTask,		/* Function that implements the task */
+  "scanKeys",		/* Text name for the task */
+  64,      		/* Stack size in words, not bytes */
+  NULL,			/* Parameter passed into the task */  //pvParameters input NULL for now
+  1,			/* Task priority */
+  &scanKeysHandle );	/* Pointer to store the task handle */
+
+  vTaskStartScheduler();  //has to go at the end
+
 }
+
 
 void loop() {
   // put your main code here, to run repeatedly:
@@ -213,74 +259,15 @@ void loop() {
 
   next += interval;
 
-
   //Update display
   u8g2.clearBuffer();         // clear the internal memory
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
   u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory, cursor starts at 2,10
   // u8g2.print(count++);      //Iteration count
   
-  std::bitset<32> inputs;
-  // std::bitset<4> inputs = readCols();
-
-  for(int loopCount = 0; loopCount < 3; loopCount++){
-    setRow(loopCount);
-    delayMicroseconds(3); //needed due to parasitic cap
-    std::bitset<4> inputShort = readCols();
-    // u8g2.setCursor(3,0);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
-    // u8g2.print(inputShort.to_ulong(),HEX);
-
-    for (int i = 0; i < 4; ++i) {
-        inputs[( (4*loopCount+1)-1 ) + i] = ~ inputShort[i];  //bit inversion
-    }
-  }
-
-  // Add code to your main loop that will check the state of each key in inputs and look up the 
-  // corresponding step size in the stepSizes array if the key is pressed. Store the result in a global variable: currentStepSize
   // currentStepSize handled in the keyPressed section
-  std::string note = keyPressed(inputs);
+  std::string note = keyPressed(sysState.inputs);
 
-  // switch (note){
-  //   case "C":
-  //     currentStepSize = stepSizes[0];
-  //     break;
-  //   case "C#":
-  //     currentStepSize = stepSizes[1];
-  //     break;
-  //   case "D":
-  //     currentStepSize = stepSizes[2];
-  //     break;
-  //   case "D#":
-  //     currentStepSize = stepSizes[3];
-  //     break;
-  //   case "E":
-  //     currentStepSize = stepSizes[4];
-  //     break;
-  //   case "F":
-  //     currentStepSize = stepSizes[5];
-  //     break;  
-  //   case "F#":
-  //     currentStepSize = stepSizes[6];
-  //     break;                      
-  //   case "G":
-  //     currentStepSize = stepSizes[7];
-  //     break;
-  //   case "G#":
-  //     currentStepSize = stepSizes[8];
-  //     break;
-  //   case "A":
-  //     currentStepSize = stepSizes[9];
-  //     break;
-  //   case "A#":
-  //     currentStepSize = stepSizes[10];
-  //     break;
-  //   case "B":
-  //     currentStepSize = stepSizes[11];
-  //     break;                              
-  //   default:
-  //     currentStepSize = stepSizes[9];
-  // }
-  
   u8g2.setCursor(2,20);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
   //u8g2.print(inputs.to_ulong(),HEX);  //Print the output data in HEX encoding from the position the cursor is set to
   //u8g2.print(keyPressed(inputs).to_ulong(), HEX);  //Print the output data in HEX encoding from the position the cursor is set to
@@ -294,3 +281,4 @@ void loop() {
   digitalToggle(LED_BUILTIN);
   
 }
+
