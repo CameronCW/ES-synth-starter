@@ -183,24 +183,25 @@ void scanKeysTask(void * pvParameters) {        //code for scanning the keyboard
     // Look up the phase step size for the key that is pressed and update currentStepSize
   const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
-
+  std::bitset<2> lastKnob1 = 0;
   while (1) {   //Infinite loop - i.e independent thread
       //std::bitset<32> inputs; //superseded by sysState.inputs
       // std::bitset<4> inputs = readCols();
       vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
-      for(int loopCount = 0; loopCount < 3; loopCount++){
+      for(int loopCount = 0; loopCount < 4; loopCount++){
         setRow(loopCount);
         delayMicroseconds(3); //needed due to parasitic cap
 
         std::bitset<4> inputShort = readCols();
-
+        xSemaphoreTake(sysState.mutex, portMAX_DELAY);   // TODO FIXME broken
         for (int i = 0; i < 4; ++i) {
-            xSemaphoreTake(sysState.mutex, portMAX_DELAY);
             sysState.inputs[( (4*loopCount+1)-1 ) + i] = ~ inputShort[i];  //bit inversion
-            xSemaphoreGive(sysState.mutex);
         }
+        xSemaphoreGive(sysState.mutex);
       } 
+      lastKnob1[0] = sysState.inputs[12];
+      lastKnob1[1] = sysState.inputs[13];
   }
 }
 
@@ -231,10 +232,12 @@ void displayUpdateTask(void * pvParameters){
     u8g2.setCursor(2,20);               //x, y: Pixel position for the cursor when printing Cursor 2 down, 20 from left 
     //u8g2.print(inputs.to_ulong(),HEX);  //Print the output data in HEX encoding from the position the cursor is set to
     //u8g2.print(keyPressed(inputs).to_ulong(), HEX);  //Print the output data in HEX encoding from the position the cursor is set to
-    u8g2.print(note.c_str());  //Print the output data in HEX encoding from the position the cursor is set to
+
+    //u8g2.print(note.c_str());  //Print the output data in HEX encoding from the position the cursor is set to
+
     // u8g2.setCursor(2, 20);
     // u8g2.print("Step Sizes: ");
-    // u8g2.print(currentStepSize); 
+    u8g2.print(sysState.inputs.to_ulong(),HEX); 
     u8g2.sendBuffer();          // transfer internal memory to the display
 
     //Toggle LED
