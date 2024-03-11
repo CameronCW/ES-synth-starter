@@ -90,28 +90,12 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,LOW);
 }
 
-void sampleISR() {
-  static uint32_t phaseAcc = 0; //Static variable, local scope (static means it is stored between successive fn, stored for program lifetime)
-                //But is shared between every instance (so if class, all instances share it)+
-  uint32_t localCurrentStepSize;
-  //__atomic_load_n(&currentStepSize, &localCurrentStepSize, __ATOMIC_RELAXED);                
-  //phaseAcc += localCurrentStepSize;
-  phaseAcc += currentStepSize;
-  int32_t Vout = (phaseAcc >> 24) - 128;
-  Vout = Vout >> (8 - sysState.knob[3]);    //knob[3] used for volumeControl, should zero based on shifts
-      //Right-shift (divide by ) the phase accumlator and subtract , to scale the range to -2^7 <= Vout <= 2^7 -1:
-  analogWrite(OUTR_PIN, Vout + 128);
-
-  // In future, you will need to multiply and add signals, for example to implement a volume control or polyphony. That will be easier when samples have an offset of zero because the 
-  //offset will be unaffected by mathematical operations. 
-  //Meanwhile, the phase accumulator itself cannot have a zero offset because that would require a signed integer and the overflow of signed integers results in undefined behaviour in C and C++.
-}
 
 struct {    //store system state that is used in more than one thread
   std::bitset<32> inputs;  // only contains the input bitset. The only other global variable is currentStepSize, 
           //but keep that apart from sysState because it is accessed by an ISR and the synchronisation method will be different
   SemaphoreHandle_t mutex;  //access to inputs is multiple cycles, therefore a mutex protects it from the multicycle threads accesses  
-  int knob[4];
+  int knob[4];              //1D array of width 4 for the knob rotation value
 } sysState;
 
 class Knob {    //TODO implement this
@@ -151,6 +135,24 @@ class Knob {    //TODO implement this
           return val;
       }
 };
+
+
+void sampleISR() {
+  static uint32_t phaseAcc = 0; //Static variable, local scope (static means it is stored between successive fn, stored for program lifetime)
+                //But is shared between every instance (so if class, all instances share it)+
+  uint32_t localCurrentStepSize;
+  //__atomic_load_n(&currentStepSize, &localCurrentStepSize, __ATOMIC_RELAXED);                
+  //phaseAcc += localCurrentStepSize;
+  phaseAcc += currentStepSize;
+  int32_t Vout = (phaseAcc >> 24) - 128;
+  Vout = Vout >> (8 - sysState.knob[3]);    //knob[3] used for volumeControl, should zero based on shifts
+      //Right-shift (divide by ) the phase accumlator and subtract , to scale the range to -2^7 <= Vout <= 2^7 -1:
+  analogWrite(OUTR_PIN, Vout + 128);
+
+  // In future, you will need to multiply and add signals, for example to implement a volume control or polyphony. That will be easier when samples have an offset of zero because the 
+  //offset will be unaffected by mathematical operations. 
+  //Meanwhile, the phase accumulator itself cannot have a zero offset because that would require a signed integer and the overflow of signed integers results in undefined behaviour in C and C++.
+}
 
 std::bitset<4> readCols(){
     //Allows for row 0 to be read, C C# D D#
@@ -239,50 +241,61 @@ void scanKeysTask(void * pvParameters) {        //code for scanning the keyboard
   std::bitset<2> knob3 = 0;
   std::bitset<2> previousKnob3 = 0;
   std::bitset<4> inputShort;
+  const std::bitset<2> posTran = 0x1;
+  const std::bitset<2> negTran = 0x3;
+  const std::bitset<2>  noTran = 0x0;
+
   int knobCount[4]; //could use bitset<3> and .to_uint, but would need to type conversion both ways often, not worth it
   std::bitset<2> previousTransition = 0; //11 is negative, 01 positve, 00 no transition
   while (1) {   //Infinite loop - i.e independent thread
-      //std::bitset<32> inputs; //superseded by sysState.inputs
-      // std::bitset<4> inputs = readCols();
-      vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    //std::bitset<32> inputs; //superseded by sysState.inputs
+    // std::bitset<4> inputs = readCols();
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
-      for(int loopCount = 0; loopCount < 4; loopCount++){
-        setRow(loopCount);
-        delayMicroseconds(3); //needed due to parasitic cap
+    for(int loopCount = 0; loopCount < 4; loopCount++){
+      setRow(loopCount);
+      delayMicroseconds(3); //needed due to parasitic cap
 
-        inputShort = readCols();
-        xSemaphoreTake(sysState.mutex, portMAX_DELAY);
-        for (int i = 0; i < 4; ++i) {
-            sysState.inputs[( (4*loopCount+1)-1 ) + i] = ~ inputShort[i];  //bit inversion
-        }
-        xSemaphoreGive(sysState.mutex);
-      } 
-      xSemaphoreTake(sysState.mutex, portMAX_DELAY); 
-      knob3[0] = sysState.inputs[12];
-      knob3[1] = sysState.inputs[13];
-      knobCount = sysState.knob;
-
-      if (( (~previousKnob3[1] & ~previousKnob3[0]) & (~knob3[1] &  knob3[0]) || 
-            ( previousKnob3[1] &  previousKnob3[0]) & ( knob3[1] & ~knob3[0]) ||   //00 to 01 or 11 to 10 for +1
-            ((~previousKnob3[1] & ~previousKnob3[0]) & ( knob3[1] &  knob3[0]) & (previousTransition&0x1)) ||     //00 to 11 impossible transition
-            ((~previousKnob3[1] &  previousKnob3[0]) & ( knob3[1] &  knob3[0]) & (previousTransition&0x1)) ||     //01 to 11 impossible transition
-            (( previousKnob3[1] & ~previousKnob3[0]) & (~knob3[1] &  knob3[0]) & (previousTransition&0x1)) )      //10 to 01 impossible tansition 
-            & ( sysState.knob[3] < 8 )  ){  //8 max value for knob
-            sysState.knob[3] ++;
-            previousTransition = 0x1;
-      }else if
-        ( ( (~previousKnob3[1] &  previousKnob3[0]) & (~knob3[1] & ~knob3[0]) || 
-            ( previousKnob3[1] & ~previousKnob3[0]) & ( knob3[1] &  knob3[0]) ||    //01 to 00 or 10 to 11 for -1
-            (( previousKnob3[1] &  previousKnob3[0]) & (~knob3[1] & ~knob3[0]) & (previousTransition&0x3) ))     //11 to 00 impossible transition
-            & ( sysState.knob[3] > 0 )   ){   
-            sysState.knob[3] --;
-            previousTransition = 0x3;
-      }else{  //otherwise ignore cases
-            previousTransition = 0x0;
-      }   
-      previousKnob3 = knob3;
-
+      inputShort = readCols();
+      xSemaphoreTake(sysState.mutex, portMAX_DELAY);
+      for (int i = 0; i < 4; ++i) {
+          sysState.inputs[( (4*loopCount+1)-1 ) + i] = ~ inputShort[i];  //bit inversion
+      }
       xSemaphoreGive(sysState.mutex);
+    } 
+    xSemaphoreTake(sysState.mutex, portMAX_DELAY);    //LOCK MUTEX
+    knob3[0] = sysState.inputs[12];
+    knob3[1] = sysState.inputs[13];
+
+    for (int i = 0; i < 4; ++i) {     //copy the knobcount from sysState
+      knobCount[i] = sysState.knob[i];
+    }
+
+
+    if (  ((~previousKnob3[1] & ~previousKnob3[0]) & (~knob3[1] &  knob3[0]) || 
+          ( previousKnob3[1] &  previousKnob3[0]) & ( knob3[1] & ~knob3[0]) ||   //00 to 01 or 11 to 10 for +1
+          ( (previousTransition == posTran) & (
+             //!! used to convert int to bool and bitset to bool
+          (!!((~previousKnob3[1] & ~previousKnob3[0]) & ( knob3[1] &  knob3[0])) ) ||     //00 to 11 impossible transition                              
+          (!!((~previousKnob3[1] &  previousKnob3[0]) & ( knob3[1] &  knob3[0])) )||     //01 to 11 impossible transition
+          (!!(( previousKnob3[1] & ~previousKnob3[0]) & (~knob3[1] &  knob3[0])) )  )))   //10 to 01 impossible tansition 
+          & ( sysState.knob[3] < 8 )  ){  //8 max value for knob
+          sysState.knob[3] ++;
+          previousTransition = posTran;
+    }else if
+      ( ( (~previousKnob3[1] &  previousKnob3[0]) & (~knob3[1] & ~knob3[0]) || 
+          ( previousKnob3[1] & ~previousKnob3[0]) & ( knob3[1] &  knob3[0]) ||    //01 to 00 or 10 to 11 for -1
+          ( (previousTransition == negTran) &
+            !!(( previousKnob3[1] &  previousKnob3[0]) & (~knob3[1] & ~knob3[0])) ) )      //11 to 00 impossible transition
+          & ( sysState.knob[3] > 0 )   ){   
+          sysState.knob[3] --;
+          previousTransition = negTran;
+    }else{  //otherwise ignore cases
+          previousTransition = noTran;
+    }   
+    previousKnob3 = knob3;
+
+    xSemaphoreGive(sysState.mutex);                 //UNLOCK MUTEX
   }
 }
 
